@@ -1,4 +1,4 @@
-# tesla-fleet-mcp
+# tesla-mcp
 
 A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). Control and monitor any Tesla vehicle (Model S/3/X/Y, Cybertruck, Semi) via Claude, Claude Code, Cursor, or any MCP-compatible AI assistant.
 
