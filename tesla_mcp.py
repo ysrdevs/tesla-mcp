@@ -250,7 +250,7 @@ mcp = FastMCP(
         "Commands require the vehicle to be awake -- use tesla_wait_for_wake first. "
         "Destructive actions (unlock, remote_start) should be confirmed with the user."
     ),
-    auth=StaticTokenVerifier(API_KEY),
+    auth=StaticTokenVerifier([API_KEY]),
 )
 
 # ===========================================================================
