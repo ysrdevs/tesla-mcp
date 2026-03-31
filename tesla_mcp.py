@@ -20,12 +20,15 @@ from pathlib import Path
 from typing import Optional, Any
 from datetime import datetime, timezone
 
+import hashlib
+import secrets
 import httpx
 import jwt
 from dotenv import load_dotenv
 
 try:
     from fastmcp import FastMCP
+    from fastmcp.server.auth.auth import TokenVerifier, AccessToken
 except ImportError:
     print("FastMCP not installed. Run: uv add fastmcp")
     sys.exit(1)
@@ -40,6 +43,10 @@ TESLA_CLIENT_SECRET = os.getenv("TESLA_CLIENT_SECRET", "")
 TESLA_REFRESH_TOKEN = os.getenv("TESLA_REFRESH_TOKEN", "")
 TESLA_VIN = os.getenv("TESLA_VIN", "")
 TESLA_REGION = os.getenv("TESLA_REGION", "na")  # na, eu, cn
+
+# MCP Auth -- set TESLA_MCP_TOKEN in .env to require bearer auth
+# If unset, auth is disabled (for local/stdio use)
+TESLA_MCP_TOKEN = os.getenv("TESLA_MCP_TOKEN", "")
 
 TOKEN_FILE = os.getenv("TESLA_TOKEN_FILE", str(Path.home() / ".tesla_tokens.json"))
 
@@ -214,6 +221,37 @@ def _vin(vin: Optional[str] = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# MCP Bearer Token Auth
+# ---------------------------------------------------------------------------
+class BearerTokenAuth(TokenVerifier):
+    """Simple bearer token auth for MCP server.
+    Compares incoming tokens against TESLA_MCP_TOKEN using constant-time comparison."""
+
+    def __init__(self, token: str):
+        super().__init__()
+        self._token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    def verify_token(self, token: str) -> AccessToken | None:
+        incoming_hash = hashlib.sha256(token.encode()).hexdigest()
+        if secrets.compare_digest(incoming_hash, self._token_hash):
+            return AccessToken(
+                token=token,
+                client_id="tesla-mcp-user",
+                scopes=["all"],
+            )
+        return None
+
+
+def _build_auth():
+    """Build auth provider if TESLA_MCP_TOKEN is set."""
+    if TESLA_MCP_TOKEN:
+        logger.info("Bearer token auth enabled for MCP server")
+        return BearerTokenAuth(TESLA_MCP_TOKEN)
+    logger.warning("No TESLA_MCP_TOKEN set -- MCP server is unauthenticated")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # FastMCP Server
 # ---------------------------------------------------------------------------
 mcp = FastMCP(
@@ -225,6 +263,7 @@ mcp = FastMCP(
         "Commands require the vehicle to be awake -- use tesla_wait_for_wake first. "
         "Destructive actions (unlock, remote_start) should be confirmed with the user."
     ),
+    auth=_build_auth(),
 )
 
 # ===========================================================================
@@ -232,7 +271,7 @@ mcp = FastMCP(
 # ===========================================================================
 @mcp.tool()
 async def tesla_oauth_url(
-    redirect_uri: str = "https://localhost/callback",
+    redirect_uri: str = "https://bigboyserver.ca/morpheus/callback",
     scopes: str = "openid offline_access user_data vehicle_device_data vehicle_location vehicle_cmds vehicle_charging_cmds",
 ) -> str:
     """Generate the Tesla OAuth authorization URL. User must visit this URL,
@@ -254,7 +293,7 @@ async def tesla_oauth_url(
 
 
 @mcp.tool()
-async def tesla_oauth_exchange(code: str, redirect_uri: str = "https://localhost/callback") -> str:
+async def tesla_oauth_exchange(code: str, redirect_uri: str = "https://bigboyserver.ca/morpheus/callback") -> str:
     """Exchange an OAuth authorization code for access + refresh tokens."""
     if not TESLA_CLIENT_ID or not TESLA_CLIENT_SECRET:
         return "Error: TESLA_CLIENT_ID and TESLA_CLIENT_SECRET must be set in environment."
