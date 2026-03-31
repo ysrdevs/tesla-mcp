@@ -1,0 +1,36 @@
+[project]
+name = "tesla-fleet-mcp"
+version = "1.0.0"
+description = "Tesla Fleet API MCP Server - 97 tools for controlling and monitoring Tesla vehicles via AI assistants"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+keywords = ["tesla", "mcp", "fleet-api", "cybertruck", "fastmcp", "ai", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Home Automation",
+]
+dependencies = [
+    "fastmcp>=2.0.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "PyJWT>=2.8.0",
+]
+
+[project.scripts]
+tesla-fleet-mcp = "tesla_mcp:mcp.run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
