@@ -252,7 +252,7 @@ sudo systemctl start tesla-mcp
 ### nginx Reverse Proxy
 
 ```nginx
-location /morpheus/ {
+location /tesla-mcp/ {
     proxy_pass http://127.0.0.1:8752/;
     proxy_http_version 1.1;
     proxy_set_header Host              $host;
