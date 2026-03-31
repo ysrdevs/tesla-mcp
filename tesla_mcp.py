@@ -6,7 +6,7 @@ A comprehensive MCP server for controlling and monitoring Tesla vehicles
 via the official Fleet API. 97 tools covering vehicle commands, data
 retrieval, charging, energy, fleet telemetry, and OAuth token management.
 
-https://github.com/uvtesla/tesla-mcp
+https://github.com/ysrdevs/tesla-mcp
 """
 
 import os
