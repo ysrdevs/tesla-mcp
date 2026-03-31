@@ -16,19 +16,18 @@ import json
 import time
 import asyncio
 import logging
+import secrets
 from pathlib import Path
 from typing import Optional, Any
 from datetime import datetime, timezone
 
-import hashlib
-import secrets
 import httpx
 import jwt
 from dotenv import load_dotenv
 
 try:
     from fastmcp import FastMCP
-    from fastmcp.server.auth.auth import TokenVerifier, AccessToken
+    from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 except ImportError:
     print("FastMCP not installed. Run: uv add fastmcp")
     sys.exit(1)
@@ -43,9 +42,6 @@ TESLA_CLIENT_SECRET = os.getenv("TESLA_CLIENT_SECRET", "")
 TESLA_REFRESH_TOKEN = os.getenv("TESLA_REFRESH_TOKEN", "")
 TESLA_VIN = os.getenv("TESLA_VIN", "")
 TESLA_REGION = os.getenv("TESLA_REGION", "na")  # na, eu, cn
-
-# MCP Auth -- set TESLA_MCP_API_KEY in .env to require auth
-# Clients pass this as the API key in their MCP config
 
 TOKEN_FILE = os.getenv("TESLA_TOKEN_FILE", str(Path.home() / ".tesla_tokens.json"))
 
@@ -220,40 +216,26 @@ def _vin(vin: Optional[str] = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# MCP API Key Auth
-# Set TESLA_MCP_API_KEY in .env. Clients pass it as the API key / Bearer token.
+# API KEY AUTHENTICATION (same pattern as GoTo MCP)
 # ---------------------------------------------------------------------------
-
-class ApiKeyAuth(TokenVerifier):
-    """Simple API key auth. Client sends the key as a Bearer token.
-    Uses constant-time comparison to prevent timing attacks."""
-
-    def __init__(self, api_key: str):
-        super().__init__()
-        self._key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-
-    def verify_token(self, token: str) -> AccessToken | None:
-        token = token.strip()
-        incoming_hash = hashlib.sha256(token.encode()).hexdigest()
-        if secrets.compare_digest(incoming_hash, self._key_hash):
-            return AccessToken(
-                token=token,
-                client_id="tesla-mcp-user",
-                scopes=["all"],
-            )
-        return None
+API_KEY_FILE = Path(__file__).parent / ".api_key"
 
 
-TESLA_MCP_API_KEY = os.getenv("TESLA_MCP_API_KEY", "")
+def get_api_key() -> str:
+    """Load or generate API key."""
+    api_key = os.environ.get("MCP_API_KEY")
+    if not api_key:
+        if API_KEY_FILE.exists():
+            api_key = API_KEY_FILE.read_text().strip()
+        else:
+            api_key = secrets.token_urlsafe(32)
+            API_KEY_FILE.write_text(api_key)
+            API_KEY_FILE.chmod(0o600)
+            print(f"[tesla-mcp] Generated new API key and saved to {API_KEY_FILE}", file=sys.stderr)
+    return api_key
 
 
-def _build_auth():
-    """Build auth provider if TESLA_MCP_API_KEY is set."""
-    if TESLA_MCP_API_KEY:
-        logger.info("API key auth enabled for MCP server")
-        return ApiKeyAuth(TESLA_MCP_API_KEY)
-    logger.warning("No TESLA_MCP_API_KEY set -- MCP server is unauthenticated")
-    return None
+API_KEY = get_api_key()
 
 
 # ---------------------------------------------------------------------------
@@ -263,12 +245,12 @@ mcp = FastMCP(
     "Tesla Fleet API",
     instructions=(
         "Control and monitor Tesla vehicles via the official Fleet API. "
-        "97 tools covering vehicle commands, data retrieval, charging, "
+        "96 tools covering vehicle commands, data retrieval, charging, "
         "energy (Powerwall/Solar), fleet telemetry, and OAuth token management. "
         "Commands require the vehicle to be awake -- use tesla_wait_for_wake first. "
         "Destructive actions (unlock, remote_start) should be confirmed with the user."
     ),
-    auth=_build_auth(),
+    auth=StaticTokenVerifier(API_KEY),
 )
 
 # ===========================================================================
