@@ -43,6 +43,11 @@ TESLA_REFRESH_TOKEN = os.getenv("TESLA_REFRESH_TOKEN", "")
 TESLA_VIN = os.getenv("TESLA_VIN", "")
 TESLA_REGION = os.getenv("TESLA_REGION", "na")  # na, eu, cn
 
+# Vehicle Command Proxy -- required for signed commands on post-2021 vehicles
+# Run: tesla-http-proxy -key-file private-key.pem -port 4443
+TESLA_PROXY_URL = os.getenv("TESLA_PROXY_URL", "")  # e.g. https://localhost:4443
+TESLA_PROXY_VERIFY_SSL = os.getenv("TESLA_PROXY_VERIFY_SSL", "false").lower() == "true"
+
 TOKEN_FILE = os.getenv("TESLA_TOKEN_FILE", str(Path.home() / ".tesla_tokens.json"))
 
 REGION_URLS = {
@@ -435,7 +440,29 @@ async def tesla_eligible_upgrades(vin: Optional[str] = None) -> dict:
 # VEHICLE COMMANDS
 # ===========================================================================
 async def _cmd(vin: Optional[str], command: str, data: Optional[dict] = None) -> dict:
+    """Send a vehicle command. Routes through Vehicle Command Proxy if configured."""
+    if TESLA_PROXY_URL:
+        return await _proxy_request(f"/api/1/vehicles/{_vin(vin)}/command/{command}", data=data)
     return await _api_request("POST", f"/api/1/vehicles/{_vin(vin)}/command/{command}", data=data)
+
+
+async def _proxy_request(path: str, data: Optional[dict] = None) -> dict:
+    """Send a signed command through the Tesla Vehicle Command Proxy."""
+    token = await _get_access_token()
+    url = f"{TESLA_PROXY_URL}{path}"
+    async with httpx.AsyncClient(timeout=30, verify=TESLA_PROXY_VERIFY_SSL) as client:
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=data,
+        )
+        if resp.status_code == 408:
+            return {"error": "Vehicle unavailable (408). It may be asleep. Try waking it first."}
+        if resp.status_code == 429:
+            reset = resp.headers.get("RateLimit-Reset", "unknown")
+            return {"error": f"Rate limited (429). Retry after {reset} seconds."}
+        resp.raise_for_status()
+        return resp.json()
 
 # --- Locks ---
 @mcp.tool()
