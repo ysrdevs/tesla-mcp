@@ -182,7 +182,7 @@ Add to `claude_desktop_config.json`:
 ### Install from GitHub with uvx
 
 ```bash
-uvx --from "git+https://github.com/YOUR_USERNAME/tesla-fleet-mcp" tesla-fleet-mcp
+uvx --from "git+https://github.com/ysrdevs/tesla-mcp" tesla-mcp
 ```
 
 ## API Regions
