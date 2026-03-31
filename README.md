@@ -40,7 +40,7 @@ A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com
 ```bash
 # Clone
 git clone https://github.com/ysrdevs/tesla-mcp
-cd tesla-fleet-mcp
+cd tesla-mcp
 
 # Install with uv
 uv sync
