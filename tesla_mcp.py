@@ -44,9 +44,8 @@ TESLA_REFRESH_TOKEN = os.getenv("TESLA_REFRESH_TOKEN", "")
 TESLA_VIN = os.getenv("TESLA_VIN", "")
 TESLA_REGION = os.getenv("TESLA_REGION", "na")  # na, eu, cn
 
-# MCP Auth -- set TESLA_MCP_TOKEN in .env to require bearer auth
-# If unset, auth is disabled (for local/stdio use)
-TESLA_MCP_TOKEN = os.getenv("TESLA_MCP_TOKEN", "")
+# MCP Auth -- set TESLA_MCP_API_KEY in .env to require auth
+# Clients pass this as the API key in their MCP config
 
 TOKEN_FILE = os.getenv("TESLA_TOKEN_FILE", str(Path.home() / ".tesla_tokens.json"))
 
@@ -221,19 +220,22 @@ def _vin(vin: Optional[str] = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# MCP Bearer Token Auth
+# MCP API Key Auth
+# Set TESLA_MCP_API_KEY in .env. Clients pass it as the API key / Bearer token.
 # ---------------------------------------------------------------------------
-class BearerTokenAuth(TokenVerifier):
-    """Simple bearer token auth for MCP server.
-    Compares incoming tokens against TESLA_MCP_TOKEN using constant-time comparison."""
 
-    def __init__(self, token: str):
+class ApiKeyAuth(TokenVerifier):
+    """Simple API key auth. Client sends the key as a Bearer token.
+    Uses constant-time comparison to prevent timing attacks."""
+
+    def __init__(self, api_key: str):
         super().__init__()
-        self._token_hash = hashlib.sha256(token.encode()).hexdigest()
+        self._key_hash = hashlib.sha256(api_key.encode()).hexdigest()
 
     def verify_token(self, token: str) -> AccessToken | None:
+        token = token.strip()
         incoming_hash = hashlib.sha256(token.encode()).hexdigest()
-        if secrets.compare_digest(incoming_hash, self._token_hash):
+        if secrets.compare_digest(incoming_hash, self._key_hash):
             return AccessToken(
                 token=token,
                 client_id="tesla-mcp-user",
@@ -242,12 +244,15 @@ class BearerTokenAuth(TokenVerifier):
         return None
 
 
+TESLA_MCP_API_KEY = os.getenv("TESLA_MCP_API_KEY", "")
+
+
 def _build_auth():
-    """Build auth provider if TESLA_MCP_TOKEN is set."""
-    if TESLA_MCP_TOKEN:
-        logger.info("Bearer token auth enabled for MCP server")
-        return BearerTokenAuth(TESLA_MCP_TOKEN)
-    logger.warning("No TESLA_MCP_TOKEN set -- MCP server is unauthenticated")
+    """Build auth provider if TESLA_MCP_API_KEY is set."""
+    if TESLA_MCP_API_KEY:
+        logger.info("API key auth enabled for MCP server")
+        return ApiKeyAuth(TESLA_MCP_API_KEY)
+    logger.warning("No TESLA_MCP_API_KEY set -- MCP server is unauthenticated")
     return None
 
 
