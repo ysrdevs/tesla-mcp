@@ -6,7 +6,7 @@ A comprehensive MCP server for controlling and monitoring Tesla vehicles
 via the official Fleet API. 97 tools covering vehicle commands, data
 retrieval, charging, energy, fleet telemetry, and OAuth token management.
 
-https://github.com/ysrdevs/tesla-mcp
+https://github.com/uvtesla/tesla-mcp
 """
 
 import os
@@ -920,4 +920,11 @@ async def tesla_key_pairing_url(domain: str, vin: Optional[str] = None) -> str:
 # Run
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.getenv("TESLA_MCP_TRANSPORT", "streamable-http")
+    host = os.getenv("TESLA_MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("TESLA_MCP_PORT", "8752"))
+
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(transport="streamable-http", host=host, port=port)
