@@ -1,8 +1,8 @@
 # tesla-mcp
 
-A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). Control and monitor any Tesla vehicle (Model S/3/X/Y, Cybertruck, Semi) via Claude, Claude Code, Cursor, or any MCP-compatible AI assistant.
+A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). Control and monitor any Tesla vehicle (Model S/3/X/Y, Cybertruck, Semi) via Claude, Claude Code, Cursor, Poke, or any MCP-compatible client.
 
-**97 tools** covering every Fleet API endpoint.
+**96 tools** covering every Fleet API endpoint.
 
 ## What You Can Do
 
@@ -38,11 +38,8 @@ A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com
 ### Install
 
 ```bash
-# Clone
-git clone https://github.com/ysrdevs/tesla-mcp
+git clone https://github.com/ysrdevs/tesla-mcp.git
 cd tesla-mcp
-
-# Install with uv
 uv sync
 ```
 
@@ -64,11 +61,67 @@ TESLA_REGION=na
 ### Run
 
 ```bash
-# With uv
-uv run tesla-fleet-mcp
-
-# Or directly
+# HTTP server (default) -- starts on port 8752
 uv run python tesla_mcp.py
+
+# stdio mode (for Claude Desktop local)
+TESLA_MCP_TRANSPORT=stdio uv run python tesla_mcp.py
+```
+
+On first run, an API key is auto-generated and saved to `.api_key` (chmod 600). You can also set `MCP_API_KEY` in your environment to use your own.
+
+## Authentication
+
+The MCP server uses API key auth via FastMCP's `StaticTokenVerifier`. Clients must pass the API key as a Bearer token.
+
+On first run, a key is auto-generated at `.api_key` in the project directory. To use your own, set `MCP_API_KEY` in `.env` or environment.
+
+### Connecting Clients
+
+**Poke / any MCP client:**
+- **Server URL**: `https://your-domain.com/path/mcp`
+- **API Key**: contents of `.api_key`
+
+**Claude Desktop (remote HTTP):**
+
+```json
+{
+  "mcpServers": {
+    "tesla": {
+      "type": "streamable-http",
+      "url": "https://your-domain.com/path/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop (local stdio, no auth needed):**
+
+```json
+{
+  "mcpServers": {
+    "tesla": {
+      "command": "/path/to/uv",
+      "args": ["run", "--directory", "/path/to/tesla-mcp", "python", "tesla_mcp.py"],
+      "env": {
+        "TESLA_MCP_TRANSPORT": "stdio",
+        "TESLA_CLIENT_ID": "your_client_id",
+        "TESLA_CLIENT_SECRET": "your_client_secret",
+        "TESLA_VIN": "your_vin",
+        "TESLA_REGION": "na"
+      }
+    }
+  }
+}
+```
+
+**Claude Code:**
+
+```bash
+claude mcp add tesla -- env TESLA_MCP_TRANSPORT=stdio uv run --directory /path/to/tesla-mcp python tesla_mcp.py
 ```
 
 ## Full Setup Guide
@@ -77,6 +130,8 @@ uv run python tesla_mcp.py
 
 Go to [developer.tesla.com](https://developer.tesla.com), create an account, and submit an application request. Select the scopes your app needs. Once approved, you'll get a Client ID and Client Secret.
 
+Set your **Allowed Origin** to your domain (e.g. `https://your-domain.com`) and **Allowed Redirect URI** to a callback path on your domain (e.g. `https://your-domain.com/morpheus/callback`).
+
 ### 2. Generate EC Key Pair
 
 Tesla requires an EC key pair for command signing and Fleet Telemetry.
@@ -84,6 +139,7 @@ Tesla requires an EC key pair for command signing and Fleet Telemetry.
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out private-key.pem
 openssl ec -in private-key.pem -pubout -out public-key.pem
+chmod 600 private-key.pem
 ```
 
 **Keep `private-key.pem` secret.** Never commit it, never host it publicly.
@@ -96,25 +152,35 @@ The public key must be accessible at:
 https://your-domain.com/.well-known/appspecific/com.tesla.3p.public-key.pem
 ```
 
-With nginx, this is a static file serve. The key must remain accessible -- Tesla re-validates it periodically.
+Example nginx config:
+
+```nginx
+location /.well-known/appspecific/com.tesla.3p.public-key.pem {
+    alias /path/to/tesla-mcp/public-key.pem;
+}
+```
+
+Tesla re-validates this periodically -- it must remain accessible.
 
 ### 4. Register with Tesla
 
-Use the MCP tools (or curl) to register your domain:
+Use the MCP tool or curl to register your domain:
 
 ```bash
-# Using the MCP server interactively via Claude:
+# Using MCP tools interactively:
 # 1. tesla_register_partner(domain="your-domain.com")
-# 2. tesla_oauth_url() -> visit the URL, log in, copy the code
-# 3. tesla_oauth_exchange(code="the_code_from_redirect")
+# 2. tesla_oauth_url() -> visit URL, log in, copy code from redirect
+# 3. tesla_oauth_exchange(code="the_code")
 ```
 
 Or via curl:
 
 ```bash
 # Get partner token
-curl -X POST https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token \
-  -d "grant_type=client_credentials&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&scope=openid vehicle_device_data vehicle_cmds vehicle_charging_cmds&audience=https://fleet-api.prd.na.vn.cloud.tesla.com"
+curl -s -X POST https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token \
+  -d "grant_type=client_credentials&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" \
+  -d "scope=openid vehicle_device_data vehicle_cmds vehicle_charging_cmds" \
+  -d "audience=https://fleet-api.prd.na.vn.cloud.tesla.com"
 
 # Register domain
 curl -X POST https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/partner_accounts \
@@ -125,16 +191,20 @@ curl -X POST https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/partner_accounts 
 
 ### 5. Pair Virtual Key to Vehicle
 
-The vehicle owner must add the virtual key. Open this URL on a phone with the Tesla app:
-
-```
-https://tesla.com/_ak/your-domain.com
-```
-
-Or with a specific VIN:
+Open this URL **on your phone** with the Tesla app installed:
 
 ```
 https://tesla.com/_ak/your-domain.com?vin=YOUR_VIN
+```
+
+The Tesla app will prompt you to add the virtual key. Accept it. One time only.
+
+Without the virtual key paired, read-only endpoints work but write commands (lock, unlock, climate, etc.) will be rejected.
+
+Verify the key is paired:
+
+```
+tesla_fleet_status
 ```
 
 ### 6. Vehicle Command Proxy (Required for Commands)
@@ -148,42 +218,65 @@ go build ./cmd/tesla-http-proxy
 ./tesla-http-proxy -key-file /path/to/private-key.pem -port 4443
 ```
 
-> **Note**: Read-only endpoints (vehicle data, list vehicles, etc.) work without the proxy. The proxy is only needed for write commands (lock, unlock, climate, charging, etc.).
+> **Note**: Read-only endpoints work without the proxy. The proxy is only needed for write commands on vehicles that require the Vehicle Command Protocol.
 
-## Usage
+## Production Deployment
 
-### Claude Code
+### systemd Service
 
-```bash
-claude mcp add tesla-fleet -- uv run --directory /path/to/tesla-fleet-mcp tesla-fleet-mcp
+```ini
+[Unit]
+Description=Tesla Fleet API MCP Server
+After=network.target
+
+[Service]
+User=forge
+Group=forge
+WorkingDirectory=/home/forge/tesla-mcp
+EnvironmentFile=/home/forge/tesla-mcp/.env
+ExecStart=/home/forge/.local/bin/uv run python tesla_mcp.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-### Claude Desktop
+```bash
+sudo cp tesla-mcp.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable tesla-mcp
+sudo systemctl start tesla-mcp
+```
 
-Add to `claude_desktop_config.json`:
+### nginx Reverse Proxy
 
-```json
-{
-  "mcpServers": {
-    "tesla": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/tesla-fleet-mcp", "tesla-fleet-mcp"],
-      "env": {
-        "TESLA_CLIENT_ID": "your_client_id",
-        "TESLA_CLIENT_SECRET": "your_client_secret",
-        "TESLA_VIN": "your_vin",
-        "TESLA_REGION": "na"
-      }
-    }
-  }
+```nginx
+location /morpheus/ {
+    proxy_pass http://127.0.0.1:8752/;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade    $http_upgrade;
+    proxy_set_header Connection "upgrade";
 }
 ```
 
-### Install from GitHub with uvx
+### Environment Variables
 
-```bash
-uvx --from "git+https://github.com/ysrdevs/tesla-mcp" tesla-mcp
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TESLA_CLIENT_ID` | | Tesla developer app Client ID |
+| `TESLA_CLIENT_SECRET` | | Tesla developer app Client Secret |
+| `TESLA_VIN` | | Default vehicle VIN |
+| `TESLA_REGION` | `na` | API region: `na`, `eu`, or `cn` |
+| `TESLA_REFRESH_TOKEN` | | OAuth refresh token (set via OAuth flow) |
+| `TESLA_TOKEN_FILE` | `~/.tesla_tokens.json` | Path to token storage |
+| `TESLA_MCP_TRANSPORT` | `streamable-http` | Transport: `streamable-http` or `stdio` |
+| `TESLA_MCP_HOST` | `0.0.0.0` | Bind address for HTTP transport |
+| `TESLA_MCP_PORT` | `8752` | Port for HTTP transport |
+| `MCP_API_KEY` | auto-generated | API key for client authentication |
 
 ## API Regions
 
@@ -192,8 +285,6 @@ uvx --from "git+https://github.com/ysrdevs/tesla-mcp" tesla-mcp
 | North America / Asia-Pacific | `https://fleet-api.prd.na.vn.cloud.tesla.com` |
 | Europe / Middle East / Africa | `https://fleet-api.prd.eu.vn.cloud.tesla.com` |
 | China | `https://fleet-api.prd.cn.vn.cloud.tesla.cn` |
-
-Set `TESLA_REGION` to `na`, `eu`, or `cn`.
 
 ## Pricing
 
@@ -218,62 +309,33 @@ Per device, per account:
 
 ## Security
 
-This server handles sensitive credentials. The following measures are built in:
+- **API key auth**: MCP server requires a Bearer token. Auto-generated on first run (saved to `.api_key` with chmod 600) or set via `MCP_API_KEY` env var.
+- **Input validation**: VINs validated against ISO 3779 format. IDs, domains, and PINs sanitized. Numeric inputs range-checked. All URL path segments validated to prevent traversal.
+- **No secrets in output**: Partner tokens used internally only, never returned to clients. Error responses sanitized.
+- **Token storage**: OAuth tokens saved to `~/.tesla_tokens.json` with chmod 600.
+- **No default PINs**: PIN parameters are required, no defaults in function signatures.
+- **Destructive action warnings**: Tools like `unlock`, `remote_start`, and `honk` prompt AI assistants to confirm with the user.
 
-- **Input validation on all parameters**: VINs are validated against the 17-character ISO 3779 format. Energy site IDs, invite IDs, and domains are sanitized to prevent path traversal. PINs are validated as exactly 4 digits. Numeric inputs are range-checked.
-- **No secrets in tool output**: Partner tokens are used internally and never returned to the MCP client. Error responses are sanitized to avoid leaking raw HTTP bodies or auth headers.
-- **Token storage**: Tokens are saved to `~/.tesla_tokens.json` with `chmod 600` (owner-read-only). The file path is not exposed in tool output.
-- **No default PINs**: PIN parameters are required (no default values like "1234" in function signatures).
-- **Destructive action warnings**: Tools like `unlock`, `remote_start`, and `honk` include docstring warnings prompting AI assistants to confirm with the user first.
+### Files to Never Commit
 
-### Before You Push to GitHub
+- `.env` -- credentials
+- `private-key.pem` -- Tesla EC private key
+- `.api_key` -- MCP auth key
+- `.tesla_tokens.json` -- OAuth tokens
 
-```bash
-# Verify no secrets are committed
-grep -rn "TESLA_CLIENT" .env          # should NOT exist in repo
-grep -rn "private-key" *.pem          # should NOT exist in repo
-cat .gitignore                        # verify .env, *.pem, .tesla_tokens.json are listed
-```
-
-### Best Practices
-
-- Never commit `.env`, `*.pem`, or `.tesla_tokens.json`
-- Use a secrets manager or env vars in production
-- Run the Vehicle Command Proxy with the private key -- don't embed the key in this server
-- Set a billing limit on your Tesla developer account to prevent surprise charges
-- Refresh tokens expire after 3 months -- the server auto-refreshes access tokens but monitor for failures
+These are all in `.gitignore`.
 
 ## Important Notes
 
 - **Vehicle must be awake** before sending commands. Use `tesla_wait_for_wake`.
 - **Virtual key must be paired** before commands work. Use `tesla_fleet_status` to check.
 - **Don't poll `vehicle_data`** regularly. Use Fleet Telemetry instead. Each call wakes the car and costs money.
-- **Some commands can't be undone**: `honk_horn`, `media_next_track`, etc. The server warns about these.
-- **Refresh tokens rotate**: When you refresh, save the new refresh token. The server handles this automatically.
-
-## Tool Count by Category
-
-| Category | Tools | Examples |
-|----------|-------|---------|
-| OAuth / Setup | 4 | `tesla_oauth_url`, `tesla_oauth_exchange`, `tesla_register_partner`, `tesla_token_status` |
-| Vehicle Data | 14 | `tesla_vehicles`, `tesla_vehicle_data`, `tesla_fleet_status`, `tesla_nearby_charging` |
-| Climate | 12 | `tesla_climate_on`, `tesla_set_temps`, `tesla_seat_heater`, `tesla_defrost` |
-| Charging | 10 | `tesla_charge_start`, `tesla_set_charge_limit`, `tesla_set_charging_amps` |
-| Locks / Trunk | 4 | `tesla_lock`, `tesla_unlock`, `tesla_open_frunk`, `tesla_open_trunk` |
-| Horn / Lights | 3 | `tesla_honk`, `tesla_flash_lights`, `tesla_boombox` |
-| Windows | 3 | `tesla_vent_windows`, `tesla_close_windows`, `tesla_sunroof` |
-| Navigation | 3 | `tesla_navigate`, `tesla_navigate_address`, `tesla_navigate_supercharger` |
-| Media | 7 | `tesla_media_toggle`, `tesla_media_next`, `tesla_adjust_volume` |
-| Security | 7 | `tesla_sentry_mode`, `tesla_valet_mode`, `tesla_speed_limit_set` |
-| Energy | 6 | `tesla_energy_live_status`, `tesla_energy_backup_reserve` |
-| Sharing | 3 | `tesla_create_share_invite`, `tesla_revoke_share_invite` |
-| Telemetry | 3 | `tesla_fleet_telemetry_config_get`, `tesla_fleet_telemetry_errors` |
-| Utility | 3 | `tesla_wait_for_wake`, `tesla_key_pairing_url`, `tesla_user_region` |
-| **Total** | **82** | |
+- **Some commands can't be undone**: `honk_horn`, `media_next_track`, etc.
+- **Refresh tokens expire after 3 months**. The server auto-refreshes access tokens.
 
 ## Contributing
 
-PRs welcome. If you're adding tools, follow the existing pattern: validate all inputs, use `_vin()` / `_validate_id()` / `_validate_domain()` for any user-provided path segments, and add range checks on numeric inputs.
+PRs welcome. Validate all inputs using `_vin()` / `_validate_id()` / `_validate_domain()` for path segments, `_validate_pin()` for PINs, and `_clamp()` for numeric ranges.
 
 ## License
 
