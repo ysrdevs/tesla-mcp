@@ -16,7 +16,6 @@ import json
 import time
 import asyncio
 import logging
-import secrets
 from pathlib import Path
 from typing import Optional, Any
 from datetime import datetime, timezone
@@ -27,9 +26,9 @@ from dotenv import load_dotenv
 
 try:
     from fastmcp import FastMCP
-    from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
+    from personal_auth import PersonalAuthProvider
 except ImportError:
-    print("FastMCP not installed. Run: uv add fastmcp")
+    print("Missing dependencies. Run: uv add fastmcp && uv add git+https://github.com/crumrine/fastmcp-personal-auth")
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
@@ -47,6 +46,11 @@ TESLA_REGION = os.getenv("TESLA_REGION", "na")  # na, eu, cn
 # Run: tesla-http-proxy -key-file private-key.pem -port 4443
 TESLA_PROXY_URL = os.getenv("TESLA_PROXY_URL", "")  # e.g. https://localhost:4443
 TESLA_PROXY_VERIFY_SSL = os.getenv("TESLA_PROXY_VERIFY_SSL", "false").lower() == "true"
+
+# MCP OAuth -- credentials for connecting to this MCP server
+MCP_BASE_URL = os.getenv("MCP_BASE_URL", "https://bigboyserver.ca/morpheus")
+MCP_CLIENT_ID = os.getenv("MCP_CLIENT_ID", "")
+MCP_CLIENT_SECRET = os.getenv("MCP_CLIENT_SECRET", "")
 
 TOKEN_FILE = os.getenv("TESLA_TOKEN_FILE", str(Path.home() / ".tesla_tokens.json"))
 
@@ -221,30 +225,9 @@ def _vin(vin: Optional[str] = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# API KEY AUTHENTICATION (same pattern as GoTo MCP)
-# ---------------------------------------------------------------------------
-API_KEY_FILE = Path(__file__).parent / ".api_key"
-
-
-def get_api_key() -> str:
-    """Load or generate API key."""
-    api_key = os.environ.get("MCP_API_KEY")
-    if not api_key:
-        if API_KEY_FILE.exists():
-            api_key = API_KEY_FILE.read_text().strip()
-        else:
-            api_key = secrets.token_urlsafe(32)
-            API_KEY_FILE.write_text(api_key)
-            API_KEY_FILE.chmod(0o600)
-            print(f"[tesla-mcp] Generated new API key and saved to {API_KEY_FILE}", file=sys.stderr)
-    return api_key
-
-
-API_KEY = get_api_key()
-
-
-# ---------------------------------------------------------------------------
-# FastMCP Server
+# OAuth 2.1 Authentication
+# Set MCP_CLIENT_ID and MCP_CLIENT_SECRET in .env
+# Clients must provide these credentials to authorize (Claude.ai Advanced Settings)
 # ---------------------------------------------------------------------------
 mcp = FastMCP(
     "Tesla Fleet API",
@@ -255,7 +238,11 @@ mcp = FastMCP(
         "Commands require the vehicle to be awake -- use tesla_wait_for_wake first. "
         "Destructive actions (unlock, remote_start) should be confirmed with the user."
     ),
-    auth=StaticTokenVerifier({API_KEY: {"client_id": "tesla-mcp-user", "scopes": ["all"]}}),
+    auth=PersonalAuthProvider(
+        base_url=MCP_BASE_URL,
+        client_id=MCP_CLIENT_ID or None,
+        client_secret=MCP_CLIENT_SECRET or None,
+    ),
 )
 
 # ===========================================================================
