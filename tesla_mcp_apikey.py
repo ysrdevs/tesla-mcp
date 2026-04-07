@@ -3,7 +3,7 @@
 Tesla Fleet API MCP Server (API Key Auth)
 
 Same as tesla_mcp.py but uses StaticTokenVerifier API key auth
-instead of OAuth. For clients like Poke that only support API keys.
+instead of OAuth. For clients like Interaction.co's Poke that only support API keys.
 
 Set MCP_API_KEY in .env or let it auto-generate to .api_key
 Default port: 8753
@@ -257,7 +257,7 @@ mcp = FastMCP(
 # ===========================================================================
 @mcp.tool()
 async def tesla_oauth_url(
-    redirect_uri: str = "https://bigboyserver.ca/morpheus/callback",
+    redirect_uri: str = "https://your-domain.com/tesla/callback",
     scopes: str = "openid offline_access user_data vehicle_device_data vehicle_location vehicle_cmds vehicle_charging_cmds",
 ) -> str:
     """Generate the Tesla OAuth authorization URL. User must visit this URL,
@@ -279,7 +279,7 @@ async def tesla_oauth_url(
 
 
 @mcp.tool()
-async def tesla_oauth_exchange(code: str, redirect_uri: str = "https://bigboyserver.ca/morpheus/callback") -> str:
+async def tesla_oauth_exchange(code: str, redirect_uri: str = "https://your-domain.com/tesla/callback") -> str:
     """Exchange an OAuth authorization code for access + refresh tokens."""
     if not TESLA_CLIENT_ID or not TESLA_CLIENT_SECRET:
         return "Error: TESLA_CLIENT_ID and TESLA_CLIENT_SECRET must be set in environment."

@@ -1,6 +1,6 @@
 # tesla-mcp
 
-A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). Control and monitor any Tesla vehicle (Model S/3/X/Y, Cybertruck, Semi) via Claude, Claude Code, Cursor, Poke, or any MCP-compatible client.
+A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). Control and monitor any Tesla vehicle (Model S/3/X/Y, Cybertruck, Semi) via Claude, Claude Code, Cursor, LLM Apps, or any MCP-compatible client.
 
 **96 tools** covering every Fleet API endpoint.
 
@@ -26,19 +26,30 @@ A comprehensive MCP server for the [Tesla Fleet API](https://developer.tesla.com
 
 **Account**: OAuth setup, token management, partner registration, virtual key pairing
 
+## Two Auth Modes
+
+This server ships with two entry points for different client types:
+
+| File | Auth | Port | Best For |
+|------|------|------|----------|
+| `tesla_mcp.py` | OAuth 2.1 (client ID + secret) | 8752 | Claude.ai (web + mobile), Claude Desktop, Claude Code |
+| `tesla_mcp_apikey.py` | API key (Bearer token) | 8753 | LLM Apps, simple MCP clients, direct API access |
+
+Both files share the same 96 tools and Tesla credentials. Run one or both depending on your needs.
+
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.10+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- [uv](https://docs.astral.sh/uv/)
 - Tesla account with a vehicle
-- Developer app registered at [developer.tesla.com](https://developer.tesla.com)
+- Developer app at [developer.tesla.com](https://developer.tesla.com)
 
 ### Install
 
 ```bash
-git clone https://github.com/ysrdevs/tesla-mcp.git
+git clone https://github.com/YOUR_USERNAME/tesla-mcp.git
 cd tesla-mcp
 uv sync
 ```
@@ -47,58 +58,44 @@ uv sync
 
 ```bash
 cp .env.example .env
-```
-
-Edit `.env` with your credentials:
-
-```env
-TESLA_CLIENT_ID=your_client_id
-TESLA_CLIENT_SECRET=your_client_secret
-TESLA_VIN=your_vin
-TESLA_REGION=na
+# Edit .env with your Tesla credentials
 ```
 
 ### Run
 
 ```bash
-# HTTP server (default) -- starts on port 8752
+# OAuth mode (Claude.ai)
 uv run python tesla_mcp.py
 
-# stdio mode (for Claude Desktop local)
+# API key mode (LLM Apps)
+uv run python tesla_mcp_apikey.py
+
+# stdio mode (Claude Desktop local, no auth needed)
 TESLA_MCP_TRANSPORT=stdio uv run python tesla_mcp.py
 ```
 
-On first run, an API key is auto-generated and saved to `.api_key` (chmod 600). You can also set `MCP_API_KEY` in your environment to use your own.
+## Connecting Clients
 
-## Authentication
+### Claude.ai (web + mobile) -- OAuth mode
 
-The MCP server uses API key auth via FastMCP's `StaticTokenVerifier`. Clients must pass the API key as a Bearer token.
+1. Run `tesla_mcp.py` on your server
+2. Go to Claude.ai → Settings → Connectors → Add custom connector
+3. URL: `https://your-domain.com/tesla/mcp`
+4. Click Advanced Settings
+5. Enter your `MCP_CLIENT_ID` and `MCP_CLIENT_SECRET`
+6. Click Add
 
-On first run, a key is auto-generated at `.api_key` in the project directory. To use your own, set `MCP_API_KEY` in `.env` or environment.
+Once connected on web, it syncs to Claude mobile automatically.
 
-### Connecting Clients
+### LLM Apps -- API key mode
 
-**Poke / any MCP client:**
-- **Server URL**: `https://your-domain.com/path/mcp`
-- **API Key**: contents of `.api_key`
+1. Run `tesla_mcp_apikey.py` on your server
+2. In LLM Apps → Settings → Connections → Add Integration → Create
+3. Name: `Tesla`
+4. URL: `https://your-domain.com/tesla-api/mcp`
+5. API Key: contents of `.api_key` file on your server
 
-**Claude Desktop (remote HTTP):**
-
-```json
-{
-  "mcpServers": {
-    "tesla": {
-      "type": "streamable-http",
-      "url": "https://your-domain.com/path/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY"
-      }
-    }
-  }
-}
-```
-
-**Claude Desktop (local stdio, no auth needed):**
+### Claude Desktop (local stdio, no auth)
 
 ```json
 {
@@ -118,7 +115,7 @@ On first run, a key is auto-generated at `.api_key` in the project directory. To
 }
 ```
 
-**Claude Code:**
+### Claude Code
 
 ```bash
 claude mcp add tesla -- env TESLA_MCP_TRANSPORT=stdio uv run --directory /path/to/tesla-mcp python tesla_mcp.py
@@ -128,13 +125,11 @@ claude mcp add tesla -- env TESLA_MCP_TRANSPORT=stdio uv run --directory /path/t
 
 ### 1. Register a Developer App
 
-Go to [developer.tesla.com](https://developer.tesla.com), create an account, and submit an application request. Select the scopes your app needs. Once approved, you'll get a Client ID and Client Secret.
+Go to [developer.tesla.com](https://developer.tesla.com), create an account, and submit an application request. Once approved, you'll get a Client ID and Client Secret.
 
-Set your **Allowed Origin** to your domain (e.g. `https://your-domain.com`) and **Allowed Redirect URI** to a callback path on your domain (e.g. `https://your-domain.com/morpheus/callback`).
+Set your **Allowed Origin** to your domain and **Allowed Redirect URI** to a callback path on your domain.
 
 ### 2. Generate EC Key Pair
-
-Tesla requires an EC key pair for command signing and Fleet Telemetry.
 
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out private-key.pem
@@ -142,17 +137,17 @@ openssl ec -in private-key.pem -pubout -out public-key.pem
 chmod 600 private-key.pem
 ```
 
-**Keep `private-key.pem` secret.** Never commit it, never host it publicly.
+**Never commit or host `private-key.pem` publicly.**
 
 ### 3. Host Your Public Key
 
-The public key must be accessible at:
+Must be accessible at:
 
 ```
 https://your-domain.com/.well-known/appspecific/com.tesla.3p.public-key.pem
 ```
 
-Example nginx config:
+nginx example:
 
 ```nginx
 location /.well-known/appspecific/com.tesla.3p.public-key.pem {
@@ -160,81 +155,78 @@ location /.well-known/appspecific/com.tesla.3p.public-key.pem {
 }
 ```
 
-Tesla re-validates this periodically -- it must remain accessible.
-
 ### 4. Register with Tesla
 
-Use the MCP tool or curl to register your domain:
-
 ```bash
-# Using MCP tools interactively:
+# Using MCP tools:
 # 1. tesla_register_partner(domain="your-domain.com")
-# 2. tesla_oauth_url() -> visit URL, log in, copy code from redirect
+# 2. tesla_oauth_url() -> visit URL, log in, copy code
 # 3. tesla_oauth_exchange(code="the_code")
-```
-
-Or via curl:
-
-```bash
-# Get partner token
-curl -s -X POST https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token \
-  -d "grant_type=client_credentials&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" \
-  -d "scope=openid vehicle_device_data vehicle_cmds vehicle_charging_cmds" \
-  -d "audience=https://fleet-api.prd.na.vn.cloud.tesla.com"
-
-# Register domain
-curl -X POST https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/partner_accounts \
-  -H "Authorization: Bearer $PARTNER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"domain":"your-domain.com"}'
 ```
 
 ### 5. Pair Virtual Key to Vehicle
 
-Open this URL **on your phone** with the Tesla app installed:
+Open on your phone with the Tesla app:
 
 ```
 https://tesla.com/_ak/your-domain.com?vin=YOUR_VIN
 ```
 
-The Tesla app will prompt you to add the virtual key. Accept it. One time only.
+Accept the prompt. One time only. Verify with `tesla_fleet_status`.
 
-Without the virtual key paired, read-only endpoints work but write commands (lock, unlock, climate, etc.) will be rejected.
+### 6. Vehicle Command Proxy
 
-Verify the key is paired:
-
-```
-tesla_fleet_status
-```
-
-### 6. Vehicle Command Proxy (Required for Commands)
-
-Post-2021 vehicles require commands to be cryptographically signed. Run Tesla's [Vehicle Command HTTP Proxy](https://github.com/teslamotors/vehicle-command):
+Post-2021 vehicles require signed commands. Build and run Tesla's [Vehicle Command Proxy](https://github.com/teslamotors/vehicle-command):
 
 ```bash
 git clone https://github.com/teslamotors/vehicle-command.git
 cd vehicle-command
 go build ./cmd/tesla-http-proxy
-./tesla-http-proxy -key-file /path/to/private-key.pem -port 4443
+
+# Generate TLS cert
+mkdir -p config
+openssl req -x509 -nodes -newkey ec \
+    -pkeyopt ec_paramgen_curve:secp384r1 \
+    -pkeyopt ec_param_enc:named_curve \
+    -subj '/CN=localhost' \
+    -keyout config/tls-key.pem -out config/tls-cert.pem -sha256 -days 3650 \
+    -addext "extendedKeyUsage = serverAuth" \
+    -addext "keyUsage = digitalSignature, keyCertSign, keyAgreement"
+
+# Run
+./tesla-http-proxy \
+    -tls-key config/tls-key.pem \
+    -cert config/tls-cert.pem \
+    -key-file /path/to/private-key.pem \
+    -port 4443
 ```
 
-> **Note**: Read-only endpoints work without the proxy. The proxy is only needed for write commands on vehicles that require the Vehicle Command Protocol.
+Add to `.env`:
+
+```env
+TESLA_PROXY_URL=https://localhost:4443
+TESLA_PROXY_VERIFY_SSL=false
+```
+
+Read-only endpoints work without the proxy. The proxy is only needed for write commands.
 
 ## Production Deployment
 
-### systemd Service
+### systemd Services
+
+**OAuth server (Claude.ai):**
 
 ```ini
 [Unit]
-Description=Tesla Fleet API MCP Server
+Description=Tesla MCP Server (OAuth)
 After=network.target
 
 [Service]
-User=forge
-Group=forge
-WorkingDirectory=/home/forge/tesla-mcp
-EnvironmentFile=/home/forge/tesla-mcp/.env
-ExecStart=/home/forge/.local/bin/uv run python tesla_mcp.py
+User=your-user
+Group=your-user
+WorkingDirectory=/path/to/tesla-mcp
+EnvironmentFile=/path/to/tesla-mcp/.env
+ExecStart=/path/to/uv run python tesla_mcp.py
 Restart=always
 RestartSec=5
 
@@ -242,18 +234,112 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-```bash
-sudo cp tesla-mcp.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable tesla-mcp
-sudo systemctl start tesla-mcp
+**API key server (LLM Apps):**
+
+```ini
+[Unit]
+Description=Tesla MCP Server (API Key)
+After=network.target
+
+[Service]
+User=your-user
+Group=your-user
+WorkingDirectory=/path/to/tesla-mcp
+EnvironmentFile=/path/to/tesla-mcp/.env
+ExecStart=/path/to/uv run python tesla_mcp_apikey.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-### nginx Reverse Proxy
+**Vehicle Command Proxy:**
+
+```ini
+[Unit]
+Description=Tesla Vehicle Command Proxy
+After=network.target
+
+[Service]
+User=your-user
+Group=your-user
+WorkingDirectory=/path/to/vehicle-command
+ExecStart=/path/to/vehicle-command/tesla-http-proxy \
+    -tls-key /path/to/vehicle-command/config/tls-key.pem \
+    -cert /path/to/vehicle-command/config/tls-cert.pem \
+    -key-file /path/to/tesla-mcp/private-key.pem \
+    -port 4443
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### nginx
 
 ```nginx
-location /tesla-mcp/ {
+# OAuth endpoints for Claude.ai
+location /authorize {
+    proxy_pass http://127.0.0.1:8752/authorize;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /token {
+    proxy_pass http://127.0.0.1:8752/token;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /register {
+    proxy_pass http://127.0.0.1:8752/register;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /.well-known/oauth-authorization-server {
+    proxy_pass http://127.0.0.1:8752/.well-known/oauth-authorization-server;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /.well-known/oauth-protected-resource {
+    proxy_pass http://127.0.0.1:8752/.well-known/oauth-protected-resource;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# Tesla public key
+location /.well-known/appspecific/com.tesla.3p.public-key.pem {
+    alias /path/to/tesla-mcp/public-key.pem;
+}
+
+# OAuth MCP server (Claude.ai)
+location /tesla/ {
     proxy_pass http://127.0.0.1:8752/;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade    $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+
+# API key MCP server (LLM Apps)
+location /tesla-api/ {
+    proxy_pass http://127.0.0.1:8753/;
     proxy_http_version 1.1;
     proxy_set_header Host              $host;
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
@@ -270,13 +356,19 @@ location /tesla-mcp/ {
 | `TESLA_CLIENT_ID` | | Tesla developer app Client ID |
 | `TESLA_CLIENT_SECRET` | | Tesla developer app Client Secret |
 | `TESLA_VIN` | | Default vehicle VIN |
-| `TESLA_REGION` | `na` | API region: `na`, `eu`, or `cn` |
-| `TESLA_REFRESH_TOKEN` | | OAuth refresh token (set via OAuth flow) |
-| `TESLA_TOKEN_FILE` | `~/.tesla_tokens.json` | Path to token storage |
-| `TESLA_MCP_TRANSPORT` | `streamable-http` | Transport: `streamable-http` or `stdio` |
-| `TESLA_MCP_HOST` | `0.0.0.0` | Bind address for HTTP transport |
-| `TESLA_MCP_PORT` | `8752` | Port for HTTP transport |
-| `MCP_API_KEY` | auto-generated | API key for client authentication |
+| `TESLA_REGION` | `na` | API region: `na`, `eu`, `cn` |
+| `TESLA_REFRESH_TOKEN` | | OAuth refresh token |
+| `TESLA_TOKEN_FILE` | `~/.tesla_tokens.json` | Token storage path |
+| `TESLA_PROXY_URL` | | Vehicle Command Proxy URL |
+| `TESLA_PROXY_VERIFY_SSL` | `false` | Verify proxy TLS cert |
+| `TESLA_MCP_TRANSPORT` | `streamable-http` | `streamable-http` or `stdio` |
+| `TESLA_MCP_HOST` | `0.0.0.0` | Bind address |
+| `TESLA_MCP_PORT` | `8752` | OAuth server port |
+| `MCP_BASE_URL` | | Public URL for OAuth discovery |
+| `MCP_CLIENT_ID` | | OAuth client ID for MCP auth |
+| `MCP_CLIENT_SECRET` | | OAuth client secret for MCP auth |
+| `MCP_API_KEY` | auto-generated | API key for API key mode |
+| `TESLA_MCP_PORT_APIKEY` | `8753` | API key server port |
 
 ## API Regions
 
@@ -288,7 +380,7 @@ location /tesla-mcp/ {
 
 ## Pricing
 
-Tesla provides a **$10/month free credit** per developer account. For personal use this covers roughly 100 commands + 2 wakes per day for 2 vehicles.
+Tesla provides a **$10/month free credit** per developer account.
 
 | Category | Rate |
 |----------|------|
@@ -309,33 +401,46 @@ Per device, per account:
 
 ## Security
 
-- **API key auth**: MCP server requires a Bearer token. Auto-generated on first run (saved to `.api_key` with chmod 600) or set via `MCP_API_KEY` env var.
-- **Input validation**: VINs validated against ISO 3779 format. IDs, domains, and PINs sanitized. Numeric inputs range-checked. All URL path segments validated to prevent traversal.
-- **No secrets in output**: Partner tokens used internally only, never returned to clients. Error responses sanitized.
-- **Token storage**: OAuth tokens saved to `~/.tesla_tokens.json` with chmod 600.
-- **No default PINs**: PIN parameters are required, no defaults in function signatures.
-- **Destructive action warnings**: Tools like `unlock`, `remote_start`, and `honk` prompt AI assistants to confirm with the user.
+**OAuth mode (`tesla_mcp.py`):**
+- Static client ID + secret required. Only clients with matching credentials can authorize.
+- Credentials checked at authorize, token exchange, and token refresh (defense in depth).
+- DCR enabled for protocol compliance but unauthorized clients are rejected at authorization.
+- Tokens persist to `.oauth-state/` (survives restarts).
+
+**API key mode (`tesla_mcp_apikey.py`):**
+- Bearer token auth via FastMCP's `StaticTokenVerifier`.
+- Auto-generated key saved to `.api_key` (chmod 600) or set via `MCP_API_KEY`.
+
+**Both modes:**
+- VINs validated against ISO 3779 format.
+- All URL path segments sanitized to prevent traversal.
+- PINs validated as exactly 4 digits, no defaults.
+- Numeric inputs range-checked.
+- No secrets in tool output.
+- Tesla OAuth tokens stored at `~/.tesla_tokens.json` (chmod 600).
+- Destructive actions (unlock, remote_start, honk) warn AI assistants to confirm with user.
 
 ### Files to Never Commit
 
-- `.env` -- credentials
-- `private-key.pem` -- Tesla EC private key
-- `.api_key` -- MCP auth key
-- `.tesla_tokens.json` -- OAuth tokens
-
-These are all in `.gitignore`.
+All in `.gitignore`:
+- `.env`
+- `*.pem` / `private-key.*`
+- `.api_key`
+- `.tesla_tokens.json`
+- `.oauth-state/`
 
 ## Important Notes
 
-- **Vehicle must be awake** before sending commands. Use `tesla_wait_for_wake`.
+- **Vehicle must be awake** before commands. Use `tesla_wait_for_wake`.
 - **Virtual key must be paired** before commands work. Use `tesla_fleet_status` to check.
-- **Don't poll `vehicle_data`** regularly. Use Fleet Telemetry instead. Each call wakes the car and costs money.
+- **Don't poll `vehicle_data`** regularly. Use Fleet Telemetry. Each call wakes the car and costs money.
 - **Some commands can't be undone**: `honk_horn`, `media_next_track`, etc.
 - **Refresh tokens expire after 3 months**. The server auto-refreshes access tokens.
+- **Vehicle Command Proxy** required for write commands on post-2021 vehicles.
 
 ## Contributing
 
-PRs welcome. Validate all inputs using `_vin()` / `_validate_id()` / `_validate_domain()` for path segments, `_validate_pin()` for PINs, and `_clamp()` for numeric ranges.
+PRs welcome. Validate all inputs with `_vin()`, `_validate_id()`, `_validate_domain()`, `_validate_pin()`, `_clamp()`.
 
 ## License
 
